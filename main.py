@@ -12,34 +12,17 @@ def send_telegram_message(chat_id, message):
     payload = {"chat_id": chat_id, "text": message}
     requests.post(url, data=payload)
 
-# === Fonction pour envoyer des boutons Telegram ===
-def send_telegram_buttons(chat_id):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    keyboard = {
-        "inline_keyboard": [
-            [
-                {"text": "Changer de ville", "callback_data": "change_city"},
-                {"text": "Obtenir la météo des 6 prochaines heures", "callback_data": "get_forecast"}
-            ]
-        ]
-    }
-    payload = {
-        "chat_id": chat_id,
-        "text": "Que voulez-vous faire ?",
-        "reply_markup": keyboard
-    }
-    requests.post(url, json=payload)
-
 # === Fonction pour récupérer les prévisions météo ===
 def get_forecast(city):
     url = f"http://api.openweathermap.org/data/2.5/forecast?q={city}&appid={OPENWEATHER_API_KEY}&units=metric&lang=fr"
     response = requests.get(url)
     data = response.json()
 
-    forecast_message = f"🌤️ Météo à {city} pour les 6 prochaines heures :\n"
+    forecast_message = f"🌤️ Météo à {city} :\n"
     next_rain = None  # Heure de la prochaine averse
 
-    for item in data["list"][:2]:  # Les 2 prochaines prévisions (soit ~6 heures)
+    # Récupère les prévisions des prochaines heures
+    for item in data["list"][:2]:  # Les 2 prochaines prévisions (~6 heures)
         time = item["dt_txt"]
         temp = item["main"]["temp"]
         wind_speed = item["wind"]["speed"]
@@ -68,29 +51,32 @@ def webhook():
     global current_city
     data = request.json
 
-    # Gérer les boutons cliqués
-    if "callback_query" in data:
-    print("Callback détecté :", data["callback_query"]["data"])
-        callback_data = data["callback_query"]["data"]
-        chat_id = data["callback_query"]["message"]["chat"]["id"]
-
-        if callback_data == "change_city":
-            send_telegram_message(chat_id, "Veuillez envoyer le nom de la nouvelle ville.")
-        elif callback_data == "get_forecast":
-            forecast = get_forecast(current_city)
-            send_telegram_message(chat_id, forecast)
-
-    # Gérer les messages texte normaux
-   elif "message" in data:
-    print("Message reçu :", data["message"]["text"])
+    if "message" in data:
+        message_text = data["message"]["text"]
         chat_id = data["message"]["chat"]["id"]
 
-        if message_text.lower() == "menu":
-            send_telegram_buttons(chat_id)
-        elif message_text.startswith("/ville "):
+        # Commande pour changer de ville
+        if message_text.startswith("/ville "):
             new_city = message_text.split("/ville ")[1]
             current_city = new_city
             send_telegram_message(chat_id, f"🔄 Ville mise à jour : {new_city}")
+        
+        # Commande pour obtenir la météo
+        elif message_text == "/meteo":
+            forecast = get_forecast(current_city)
+            send_telegram_message(chat_id, forecast)
+
+        # Commande pour savoir quand il pleuvra
+        elif message_text == "/pluie":
+            forecast = get_forecast(current_city)
+            if "🌧️" in forecast:
+                send_telegram_message(chat_id, forecast)
+            else:
+                send_telegram_message(chat_id, "✅ Pas de pluie prévue pour le moment.")
+
+        # Commande inconnue
+        else:
+            send_telegram_message(chat_id, "Commande inconnue. Essayez : /ville, /meteo, /pluie")
 
     return "OK", 200
 
