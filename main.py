@@ -70,7 +70,7 @@ def webhook():
 
     # Gérer les boutons cliqués
     if "callback_query" in data:
-        print("Callback reçu :", data["callback_query"]["data"])
+    print("Callback détecté :", data["callback_query"]["data"])
         callback_data = data["callback_query"]["data"]
         chat_id = data["callback_query"]["message"]["chat"]["id"]
 
@@ -81,8 +81,8 @@ def webhook():
             send_telegram_message(chat_id, forecast)
 
     # Gérer les messages texte normaux
-    elif "message" in data:
-        message_text = data["message"]["text"]
+   elif "message" in data:
+    print("Message reçu :", data["message"]["text"])
         chat_id = data["message"]["chat"]["id"]
 
         if message_text.lower() == "menu":
