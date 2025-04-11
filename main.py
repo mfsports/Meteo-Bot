@@ -21,15 +21,6 @@ def send_telegram_message(chat_id, message, reply_markup=None):
     requests.post(url, json=payload)
 
 # === Boutons
-def get_start_button():
-    return {
-        "keyboard": [
-            [{"text": "🚴‍♂️ Démarrer"}]
-        ],
-        "resize_keyboard": True,
-        "one_time_keyboard": True
-    }
-
 def get_main_keyboard():
     return {
         "keyboard": [
@@ -46,7 +37,16 @@ def get_end_button():
             [{"text": "✅ Terminé"}]
         ],
         "resize_keyboard": True,
-        "one_time_keyboard": True
+        "one_time_keyboard": False
+    }
+
+def get_start_button():
+    return {
+        "keyboard": [
+            [{"text": "🚴 Démarrer"}]
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": False
     }
 
 # === Convertit degrés en direction
@@ -167,23 +167,27 @@ def webhook():
         if message_text == "/start":
             send_telegram_message(
                 chat_id,
-                "🤖 Salut cycliste ! Tape sur le bouton ci-dessous pour commencer et connaître la météo.",
+                "🤖 Salut cycliste ! Utilise le bouton ci-dessous pour commencer et choisir la météo ou la localisation.",
                 reply_markup=get_start_button()
             )
-        elif message_text == "🚴‍♂️ Démarrer":
-            send_telegram_message(chat_id, "Choisis une option ci-dessous : Localisation ou Ville", reply_markup=get_main_keyboard())
-        elif message_text == "📍 Localisation":
-            send_telegram_message(chat_id, "📡 Partage ta position via le bouton ⬆️")
+        elif message_text == "🚴 Démarrer":
+            send_telegram_message(
+                chat_id,
+                "🤖 Salut cycliste ! Choisis la localisation ou la ville pour laquelle tu veux connaître la météo.",
+                reply_markup=get_main_keyboard()
+            )
         elif message_text == "🔍 Ville":
             user_state[chat_id] = "awaiting_city"
-            send_telegram_message(chat_id, "🧭 Dis-moi la ville pour laquelle tu veux connaître la météo.")
+            send_telegram_message(chat_id, "🧭 Indique-moi la ville pour laquelle tu veux connaître la météo.")
+        elif message_text == "📍 Localisation":
+            send_telegram_message(chat_id, "📡 Partage ta position via le bouton ⬆️")
         elif message_text == "✅ Terminé":
-            send_telegram_message(chat_id, "Bot mis en pause. Tape /start pour redémarrer.", reply_markup=get_start_button())
+            send_telegram_message(chat_id, "Bot mis en pause. À bientôt!", reply_markup=get_start_button())
         else:
             send_telegram_message(
                 chat_id,
-                "🤖 Tape /start pour démarrer ou utilise les boutons ci-dessous 👇",
-                reply_markup=get_start_button()
+                "🤖 Tape /start ou utilise les boutons ci-dessous 👇",
+                reply_markup=get_main_keyboard()
             )
 
     return "OK", 200
