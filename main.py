@@ -27,7 +27,7 @@ def get_main_keyboard():
     return {
         "keyboard": [
             [{"text": "Localisation 📍", "request_location": True}],
-            [{"text": "Ville 🌇"}]
+            [{"text": "Ville"}]
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False
@@ -151,17 +151,13 @@ def webhook():
                 "⬇️ Utilise les boutons ci-dessous pour commencer ⬇️",
                 reply_markup=get_main_keyboard()
             )
-        elif "ville" in message_text.lower():
+        elif message_text.lower() == "ville":
             user_state[chat_id] = "awaiting_city"
             send_telegram_message(chat_id, "🧱 Dis-moi la ville que tu veux consulter.")
         elif "localisation" in message_text.lower():
             send_telegram_message(chat_id, "📡 Clique sur le bouton pour partager ta position.")
-        elif len(message_text.split()) == 1:
-            meteo = get_forecast_by_city(message_text)
-            if "❌" in meteo:
-                send_telegram_message(chat_id, "❌ Je ne reconnais pas cette ville. Essaie encore 🌍.")
-            else:
-                send_telegram_message(chat_id, meteo, reply_markup=get_main_keyboard())
+        elif len(message_text.split()) == 1 and user_state.get(chat_id) != "awaiting_city":
+            send_telegram_message(chat_id, "❓ Pour voir la météo d’une ville, clique sur le bouton “Ville” ou tape son nom.")
         else:
             send_telegram_message(
                 chat_id,
