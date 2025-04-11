@@ -25,10 +25,20 @@ def get_main_keyboard():
     return {
         "keyboard": [
             [{"text": "📍 Localisation", "request_location": True}],
-            [{"text": "🔍 Ville"}]
+            [{"text": "🔍 Ville"}],
+            [{"text": "Démarrer"}]
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False
+    }
+
+def get_done_keyboard():
+    return {
+        "keyboard": [
+            [{"text": "Terminé"}]
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": True
     }
 
 # === Convertit degrés en direction
@@ -85,7 +95,7 @@ def get_forecast_by_city(city):
     response = requests.get(url)
     data = response.json()
     if "list" not in data:
-        return f"❌ Ville introuvable : {city}. Essaie avec une autre."
+        return f"❌ Ville introuvable. Essaie avec une autre 🗺️."
 
     now = data["list"][0]
     now_temp = round(now["main"]["temp"])
@@ -128,7 +138,7 @@ def webhook():
         lat = data["message"]["location"]["latitude"]
         lon = data["message"]["location"]["longitude"]
         meteo = get_forecast_by_coords(lat, lon)
-        send_telegram_message(chat_id, meteo, reply_markup=get_main_keyboard())
+        send_telegram_message(chat_id, meteo, reply_markup=get_done_keyboard())
         return "OK", 200
 
     # --- Texte
@@ -141,7 +151,7 @@ def webhook():
             if "❌" in meteo:
                 send_telegram_message(chat_id, "❌ Ville introuvable. Essaie avec une autre 🗺️.")
             else:
-                send_telegram_message(chat_id, meteo, reply_markup=get_main_keyboard())
+                send_telegram_message(chat_id, meteo, reply_markup=get_done_keyboard())
                 user_state.pop(chat_id)
             return "OK", 200
 
@@ -149,7 +159,7 @@ def webhook():
         if message_text == "/start":
             send_telegram_message(
                 chat_id,
-                "🤖 Salut cycliste ! Utilise les boutons ci-dessous pour connaître la météo ou envoie ta ville.",
+                "🤖 Salut cycliste ! Utilise le bouton ci-dessous pour connaître la météo.",
                 reply_markup=get_main_keyboard()
             )
         elif message_text == "🔍 Ville":
