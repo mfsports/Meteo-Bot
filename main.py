@@ -1,156 +1,192 @@
-import os
 import requests
+import os
 from flask import Flask, request
-from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
-# === Mémoire utilisateur
+# Mémoire temporaire
 user_state = {}
 
-# === Envoyer un message Telegram ===
-def send_telegram_message(chat_id, text, reply_markup=None):
+# === Telegram : envoi de message
+def send_telegram_message(chat_id, message, reply_markup=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
-        "text": text,
+        "text": message,
         "reply_markup": reply_markup
     }
     requests.post(url, json=payload)
 
-# === Boutons clavier ===
+# === Boutons
+def get_start_button():
+    return {
+        "keyboard": [
+            [{"text": "🚴‍♂️ Démarrer"}]
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": True
+    }
+
 def get_main_keyboard():
     return {
         "keyboard": [
-            [{"text": "\ud83d\udccd Localisation", "request_location": True}],
-            [{"text": "\ud83d\udd0d Ville"}]
+            [{"text": "📍 Localisation", "request_location": True}],
+            [{"text": "🔍 Ville"}]
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False
     }
 
-def get_done_keyboard():
+def get_end_button():
     return {
-        "keyboard": [[{"text": "\u2705 Terminé"}]],
+        "keyboard": [
+            [{"text": "✅ Terminé"}]
+        ],
         "resize_keyboard": True,
         "one_time_keyboard": True
     }
 
-# === Utilitaires ===
+# === Convertit degrés en direction
 def degrees_to_cardinal(deg):
     directions = ['nord', 'nord-est', 'est', 'sud-est', 'sud', 'sud-ouest', 'ouest', 'nord-ouest']
     ix = int((deg + 22.5) / 45.0) % 8
     return directions[ix]
 
 def reco_direction(deg):
-    return degrees_to_cardinal(deg + 180)
+    return degrees_to_cardinal(deg)
 
-# === Traitement Météo ===
-def format_forecast(data):
-    now = datetime.utcnow()
-    hourly_data = []
-    for item in data["list"]:
-        dt = datetime.strptime(item["dt_txt"], "%Y-%m-%d %H:%M:%S")
-        if dt > now:
-            hourly_data.append(item)
-        if len(hourly_data) == 3:
-            break
+# === Météo par coordonnées GPS
+def get_forecast_by_coords(lat, lon):
+    url = f"http://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={OPENWEATHER_API_KEY}&units=metric&lang=fr"
+    response = requests.get(url)
+    data = response.json()
 
-    now_temp = round(data["list"][0]["main"]["temp"])
-    now_desc = data["list"][0]["weather"][0]["description"]
-    forecast = f"\ud83c\udf24\ufe0f Météo actuelle : {now_temp}°C, {now_desc}\n\n"
-    forecast += "\u23f3 Prévisions sur 6h :\n"
-    pluie = False
-    wind_dir = None
+    if "list" not in data:
+        return "❌ Erreur météo à cet endroit."
 
-    for item in hourly_data:
+    now = data["list"][0]
+    now_temp = round(now["main"]["temp"])
+    now_desc = now["weather"][0]["description"]
+
+    forecast_message = f"📍 Météo actuelle : {now_temp}°C, {now_desc}\n\n"
+    forecast_message += "⏳ Prévisions sur 6h :\n"
+    wind_dir_deg = None
+    pluie_detectee = False
+
+    for item in data["list"][:2]:
         time = item["dt_txt"][11:16]
         temp = round(item["main"]["temp"])
         wind_speed = round(item["wind"]["speed"])
-        wind_deg = item["wind"]["deg"]
-        wind_dir = degrees_to_cardinal(wind_deg)
-        rain = item.get("rain", {}).get("3h", 0)
-        if rain > 0:
-            pluie = True
-        forecast += f"- {time} : {temp}°C, vent {wind_speed} km/h venant du {wind_dir}"
-        forecast += f", pluie : {rain} mm\n" if rain else ", pas de pluie\n"
+        wind_dir_deg = item["wind"]["deg"]
+        wind_dir = degrees_to_cardinal(wind_dir_deg)
+        pluie = item.get("rain", {}).get("3h", 0)
+        if pluie > 0:
+            pluie_detectee = True
+        forecast_message += f"- {time} : {temp}°C, vent {wind_speed} km/h venant du {wind_dir}"
+        forecast_message += f", pluie : {pluie} mm\n" if pluie > 0 else ", pas de pluie\n"
 
-    if wind_dir:
-        reco = reco_direction(item["wind"]["deg"])
-        forecast += f"\n\ud83d\udeb4 Conseil : pars vers le **{reco}** pour rentrer avec le vent dans le dos \ud83d\udca8\n"
-    if not pluie:
-        forecast += "\n\u2705 Aucune pluie prévue sur les 6 prochaines heures"
+    if wind_dir_deg:
+        reco = reco_direction(wind_dir_deg)
+        forecast_message += f"\n🚴‍♂️ Conseil : pars vers le **{reco}** pour rentrer avec le vent dans le dos ! 💪"
 
-    return forecast
+    if not pluie_detectee:
+        forecast_message += "\n✅ Aucune pluie prévue sur les 6 prochaines heures"
 
-# === Requêtes Météo ===
-def get_forecast_by_coords(lat, lon):
-    url = f"http://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={OPENWEATHER_API_KEY}&units=metric&lang=fr"
-    r = requests.get(url).json()
-    if "list" not in r:
-        return "\u274c Erreur lors de la récupération de la météo."
-    return format_forecast(r)
+    return forecast_message
 
+# === Météo par nom de ville
 def get_forecast_by_city(city):
     url = f"http://api.openweathermap.org/data/2.5/forecast?q={city}&appid={OPENWEATHER_API_KEY}&units=metric&lang=fr"
-    r = requests.get(url).json()
-    if "list" not in r:
-        return None
-    return format_forecast(r)
+    response = requests.get(url)
+    data = response.json()
+    if "list" not in data:
+        return f"❌ Ville introuvable : {city}"
 
-# === Webhook ===
+    now = data["list"][0]
+    now_temp = round(now["main"]["temp"])
+    now_desc = now["weather"][0]["description"]
+
+    forecast_message = f"🏙️ Météo à {city} maintenant : {now_temp}°C, {now_desc}\n\n"
+    forecast_message += "⏳ Prévisions sur 6h :\n"
+    wind_dir_deg = None
+    pluie_detectee = False
+
+    for item in data["list"][:2]:
+        time = item["dt_txt"][11:16]
+        temp = round(item["main"]["temp"])
+        wind_speed = round(item["wind"]["speed"])
+        wind_dir_deg = item["wind"]["deg"]
+        wind_dir = degrees_to_cardinal(wind_dir_deg)
+        pluie = item.get("rain", {}).get("3h", 0)
+        if pluie > 0:
+            pluie_detectee = True
+        forecast_message += f"- {time} : {temp}°C, vent {wind_speed} km/h venant du {wind_dir}"
+        forecast_message += f", pluie : {pluie} mm\n" if pluie > 0 else ", pas de pluie\n"
+
+    if wind_dir_deg:
+        reco = reco_direction(wind_dir_deg)
+        forecast_message += f"\n🚴‍♂️ Conseil : pars vers le **{reco}** pour rentrer avec le vent dans le dos ! 💪"
+
+    if not pluie_detectee:
+        forecast_message += "\n✅ Aucune pluie prévue sur les 6 prochaines heures"
+
+    return forecast_message
+
+# === Webhook Flask
 @app.route("/", methods=["POST"])
 def webhook():
     data = request.json
     chat_id = data["message"]["chat"]["id"]
 
+    # --- Localisation GPS
     if "location" in data["message"]:
         lat = data["message"]["location"]["latitude"]
         lon = data["message"]["location"]["longitude"]
-        forecast = get_forecast_by_coords(lat, lon)
-        send_telegram_message(chat_id, forecast, reply_markup=get_done_keyboard())
-        user_state[chat_id] = "done"
-        return "OK"
+        meteo = get_forecast_by_coords(lat, lon)
+        send_telegram_message(chat_id, meteo, reply_markup=get_end_button())
+        return "OK", 200
 
+    # --- Texte
     if "text" in data["message"]:
-        text = data["message"]["text"].strip()
-        state = user_state.get(chat_id)
+        message_text = data["message"]["text"]
 
-        if text == "/start" or state is None or state == "paused":
-            user_state[chat_id] = "awaiting_choice"
-            send_telegram_message(chat_id, "\ud83e\udd16 Bonjour ! Choisis une option pour commencer :", reply_markup=get_main_keyboard())
-            return "OK"
-
-        if state == "awaiting_city":
-            forecast = get_forecast_by_city(text)
-            if forecast:
-                send_telegram_message(chat_id, forecast, reply_markup=get_done_keyboard())
-                user_state[chat_id] = "done"
+        # --- Réponse à une ville demandée
+        if user_state.get(chat_id) == "awaiting_city":
+            meteo = get_forecast_by_city(message_text)
+            if "❌" in meteo:
+                send_telegram_message(chat_id, "❌ Ville introuvable. Essaie avec une autre 🗺️.")
             else:
-                send_telegram_message(chat_id, "\u274c Ville introuvable. Essaie encore.")
-            return "OK"
+                send_telegram_message(chat_id, meteo, reply_markup=get_end_button())
+                user_state.pop(chat_id)
+            return "OK", 200
 
-        if text == "\ud83d\udd0d Ville":
+        # Commandes normales
+        if message_text == "/start":
+            send_telegram_message(
+                chat_id,
+                "🤖 Salut cycliste ! Tape sur le bouton ci-dessous pour commencer et connaître la météo.",
+                reply_markup=get_start_button()
+            )
+        elif message_text == "🚴‍♂️ Démarrer":
+            send_telegram_message(chat_id, "Choisis une option ci-dessous : Localisation ou Ville", reply_markup=get_main_keyboard())
+        elif message_text == "📍 Localisation":
+            send_telegram_message(chat_id, "📡 Partage ta position via le bouton ⬆️")
+        elif message_text == "🔍 Ville":
             user_state[chat_id] = "awaiting_city"
-            send_telegram_message(chat_id, "\ud83c\udf0d Indique une ville :")
-            return "OK"
+            send_telegram_message(chat_id, "🧭 Dis-moi la ville pour laquelle tu veux connaître la météo.")
+        elif message_text == "✅ Terminé":
+            send_telegram_message(chat_id, "Bot mis en pause. Tape /start pour redémarrer.", reply_markup=get_start_button())
+        else:
+            send_telegram_message(
+                chat_id,
+                "🤖 Tape /start pour démarrer ou utilise les boutons ci-dessous 👇",
+                reply_markup=get_start_button()
+            )
 
-        if text == "\u2705 Terminé":
-            user_state[chat_id] = "paused"
-            send_telegram_message(chat_id, "\ud83d\udecc Bot en pause. Tape /start pour relancer.")
-            return "OK"
-
-        if state == "awaiting_choice":
-            send_telegram_message(chat_id, "\u2753 Choisis une option ci-dessous :", reply_markup=get_main_keyboard())
-            return "OK"
-
-        # Si rien ne correspond
-        send_telegram_message(chat_id, "\ud83d\udecc Dis-moi par où commencer :", reply_markup=get_main_keyboard())
-
-    return "OK"
+    return "OK", 200
 
 if __name__ == "__main__":
     app.run()
