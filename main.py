@@ -1,7 +1,11 @@
 import requests
+import os
 from flask import Flask, request
-
 app = Flask(__name__)
+
+# Variables d'environnement
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
 # Variables globales
 current_city = "Paris"  # Ville par défaut
