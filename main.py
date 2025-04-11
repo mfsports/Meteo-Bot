@@ -25,7 +25,7 @@ def get_main_keyboard():
     return {
         "keyboard": [
             [{"text": "📍 Localisation", "request_location": True}],
-            [{"text": "🔍 Chercher une ville"}]
+            [{"text": "🔍 Ville"}]
         ],
         "resize_keyboard": True,
         "one_time_keyboard": False
@@ -152,7 +152,7 @@ def webhook():
                 "🤖 Salut cycliste ! Utilise les boutons ci-dessous pour connaître la météo ou envoie ta ville.",
                 reply_markup=get_main_keyboard()
             )
-        elif message_text == "🔍 Chercher une ville":
+        elif message_text == "🔍 Ville":
             user_state[chat_id] = "awaiting_city"
             send_telegram_message(chat_id, "🧭 Dis-moi la ville que tu veux consulter.")
         elif message_text == "📍 Localisation":
