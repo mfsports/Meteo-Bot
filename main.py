@@ -4,92 +4,109 @@ from flask import Flask, request
 
 app = Flask(__name__)
 
-# Variables d'environnement
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
-# Ville par défaut
-current_city = "Paris"
-
-# === Envoie un message Telegram ===
-def send_telegram_message(chat_id, message):
+# === Envoie un message texte
+def send_telegram_message(chat_id, message, reply_markup=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message}
-    requests.post(url, data=payload)
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "reply_markup": reply_markup
+    }
+    requests.post(url, json=payload)
 
-# === Convertit degrés en direction cardinal ===
+# === Boutons Telegram
+def get_main_keyboard():
+    return {
+        "keyboard": [
+            [{"text": "📍 Localisation", "request_location": True}],
+            [{"text": "🌧️ Pluie"}, {"text": "⏳ Prévisions 6h"}]
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": False
+    }
+
+# === Direction du vent cardinal
 def degrees_to_cardinal(deg):
-    directions = ['nord', 'nord-est', 'est', 'sud-est', 'sud', 'sud-ouest', 'ouest', 'nord-ouest']
+    dirs = ['nord', 'nord-est', 'est', 'sud-est', 'sud', 'sud-ouest', 'ouest', 'nord-ouest']
     ix = int((deg + 22.5) / 45.0) % 8
-    return directions[ix]
+    return dirs[ix]
 
-# === Recommande la direction pour partir (même que celle du vent) ===
+# === Conseil cycliste : partir face au vent pour revenir avec dans le dos
 def reco_direction(deg):
-    return degrees_to_cardinal(deg)  # On part dans la direction d'où vient le vent
+    return degrees_to_cardinal(deg)
 
-# === Récupère la météo sur 6 heures + conseil cycliste ===
-def get_forecast(city):
-    url = f"http://api.openweathermap.org/data/2.5/forecast?q={city}&appid={OPENWEATHER_API_KEY}&units=metric&lang=fr"
+# === Récupère la météo via coordonnées
+def get_forecast_by_coords(lat, lon):
+    url = f"http://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={OPENWEATHER_API_KEY}&units=metric&lang=fr"
     response = requests.get(url)
     data = response.json()
 
     if "list" not in data:
-        return f"❌ Impossible de récupérer les prévisions météo pour {city}. Réponse API : {data}"
+        return "❌ Impossible de récupérer la météo à cet endroit."
 
-    forecast_message = f"🌤️ Météo à {city} pour les 6 prochaines heures :\n"
+    forecast_message = f"🌤️ Météo pour les 6 prochaines heures :\n"
     wind_dir_deg = None
 
-    for item in data["list"][:2]:  # ≈ 6 heures
+    for item in data["list"][:2]:  # ≈ 6h
         time = item["dt_txt"][11:16]
         temp = round(item["main"]["temp"])
         wind_speed = round(item["wind"]["speed"])
         wind_dir_deg = item["wind"]["deg"]
         wind_dir = degrees_to_cardinal(wind_dir_deg)
+        forecast_message += f"- {time} : 🌡️ {temp}°C, 💨 {wind_speed} km/h venant du {wind_dir}\n"
 
-        forecast_message += f"- {time} : 🌡️ {temp}°C, 💨 vent {wind_speed} km/h venant du {wind_dir}\n"
-
-    if wind_dir_deg is not None:
+    if wind_dir_deg:
         reco = reco_direction(wind_dir_deg)
         forecast_message += f"\n🚴‍♂️ Conseil cycliste : pars vers le **{reco}** pour rentrer avec le vent dans le dos ! 💪"
 
     return forecast_message
 
-# === Webhook pour Telegram ===
+# === Route principale webhook
 @app.route("/", methods=["POST"])
 def webhook():
-    global current_city
     data = request.json
+    chat_id = data["message"]["chat"]["id"]
 
-    if "message" in data:
+    # --- GPS envoyé
+    if "location" in data["message"]:
+        lat = data["message"]["location"]["latitude"]
+        lon = data["message"]["location"]["longitude"]
+        forecast = get_forecast_by_coords(lat, lon)
+        send_telegram_message(chat_id, forecast, reply_markup=get_main_keyboard())
+        return "OK", 200
+
+    # --- Texte envoyé
+    if "text" in data["message"]:
         message_text = data["message"]["text"]
-        chat_id = data["message"]["chat"]["id"]
 
-        if message_text.startswith("/ville "):
-            new_city = message_text.split("/ville ")[1]
-            current_city = new_city
-            send_telegram_message(chat_id, f"📍 Ville mise à jour : {new_city}")
+        if message_text == "/start":
+            send_telegram_message(
+                chat_id,
+                "🤖 Salut ! Comment puis-je t'aider ?\n"
+                "/pluie pour savoir s’il va pleuvoir\n"
+                "/meteo pour les prévisions 6h\n"
+                "Ou utilise les boutons ci-dessous 👇",
+                reply_markup=get_main_keyboard()
+            )
 
-        elif message_text == "/meteo":
-            forecast = get_forecast(current_city)
-            send_telegram_message(chat_id, forecast)
+        elif message_text in ["/meteo", "⏳ Prévisions 6h"]:
+            send_telegram_message(chat_id, "📍 Envoie ta localisation pour une météo précise !", reply_markup=get_main_keyboard())
 
-        elif message_text == "/pluie":
-            forecast = get_forecast(current_city)
-            if "🌧️" in forecast:
-                send_telegram_message(chat_id, forecast)
-            else:
-                send_telegram_message(chat_id, "✅ Pas de pluie prévue pour le moment.")
+        elif message_text in ["/pluie", "🌧️ Pluie"]:
+            send_telegram_message(chat_id, "📍 Envoie ta localisation pour voir s’il va pleuvoir !", reply_markup=get_main_keyboard())
 
         else:
-            send_telegram_message(chat_id,
-                "🤖 Comment puis-je t'aider ?\n"
-                "/pluie pour savoir s’il va pleuvoir\n"
-                "/meteo pour connaître les 6 prochaines heures\n"
-                "/ville pour changer de localisation"
+            send_telegram_message(
+                chat_id,
+                "🤖 Commande inconnue. Utilise les boutons ou tape :\n"
+                "/pluie\n/meteo\n/start",
+                reply_markup=get_main_keyboard()
             )
 
     return "OK", 200
 
-# === Lancement local (debug uniquement) ===
 if __name__ == "__main__":
     app.run()
