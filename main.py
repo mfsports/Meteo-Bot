@@ -1,58 +1,98 @@
-
 import requests
-from flask import Flask
-import os
+from flask import Flask, request
 
-# === CONFIG ===
-OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-VILLE = os.getenv("VILLE", "Paris")
-
-# === MÉTÉO ===
-def degrees_to_cardinal(deg):
-    dirs = ['nord', 'nord-est', 'est', 'sud-est', 'sud', 'sud-ouest', 'ouest', 'nord-ouest']
-    ix = int((deg + 22.5) / 45.0) % 8
-    return dirs[ix]
-
-def reco_direction(deg):
-    return degrees_to_cardinal(deg)
-
-def get_meteo(ville):
-    url = f"http://api.openweathermap.org/data/2.5/weather?q={ville}&appid={OPENWEATHER_API_KEY}&units=metric&lang=fr"
-    r = requests.get(url)
-    data = r.json()
-    vent_vitesse = data['wind']['speed']
-    vent_deg = data['wind']['deg']
-    meteo = data['weather'][0]['description']
-    temp = data['main']['temp']
-    direction = degrees_to_cardinal(vent_deg)
-    reco = reco_direction(vent_deg)
-    pluie = data.get("rain", {}).get("1h", 0)
-
-    msg = (
-        f"🚴‍♂️ Météo à {ville} aujourd'hui :\n"
-        f"🌡️ Température : {temp}°C\n"
-        f"🌤️ Ciel : {meteo}\n"
-        f"💨 Vent : {vent_vitesse} km/h venant du {direction}\n"
-        f"{'🌧️ Pluie prévue !' if pluie else ''}\n\n"
-        f"🔄 Pars vers le {reco} pour rentrer avec le vent dans le dos !"
-    )
-    return msg
-
-def envoyer_message(msg):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": msg}
-    requests.post(url, data=payload)
-
-# === FLASK APP ===
 app = Flask(__name__)
 
-@app.route("/")
-def home():
-    msg = get_meteo(VILLE)
-    envoyer_message(msg)
-    return "✅ Météo envoyée sur Telegram !"
+# Variables globales
+current_city = "Paris"  # Ville par défaut
 
+# === Fonction pour envoyer un message Telegram ===
+def send_telegram_message(chat_id, message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": chat_id, "text": message}
+    requests.post(url, data=payload)
+
+# === Fonction pour envoyer des boutons Telegram ===
+def send_telegram_buttons(chat_id):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "Changer de ville", "callback_data": "change_city"},
+                {"text": "Obtenir la météo des 6 prochaines heures", "callback_data": "get_forecast"}
+            ]
+        ]
+    }
+    payload = {
+        "chat_id": chat_id,
+        "text": "Que voulez-vous faire ?",
+        "reply_markup": keyboard
+    }
+    requests.post(url, json=payload)
+
+# === Fonction pour récupérer les prévisions météo ===
+def get_forecast(city):
+    url = f"http://api.openweathermap.org/data/2.5/forecast?q={city}&appid={OPENWEATHER_API_KEY}&units=metric&lang=fr"
+    response = requests.get(url)
+    data = response.json()
+
+    forecast_message = f"🌤️ Météo à {city} pour les 6 prochaines heures :\n"
+    next_rain = None  # Heure de la prochaine averse
+
+    for item in data["list"][:2]:  # Les 2 prochaines prévisions (soit ~6 heures)
+        time = item["dt_txt"]
+        temp = item["main"]["temp"]
+        wind_speed = item["wind"]["speed"]
+        wind_dir = item["wind"]["deg"]
+        rain_volume = item.get("rain", {}).get("3h", 0)
+
+        # Identifier la prochaine averse
+        if rain_volume > 0 and next_rain is None:
+            next_rain = time
+
+        forecast_message += (
+            f"- {time} : {temp}°C, vent à {wind_speed} km/h (direction : {wind_dir}°)"
+            + (f", pluie prévue : {rain_volume} mm\n" if rain_volume > 0 else ", pas de pluie\n")
+        )
+
+    if next_rain:
+        forecast_message += f"\n🌧️ Prochaine averse prévue vers {next_rain}\n"
+    else:
+        forecast_message += "\n✅ Aucune averse prévue dans les 6 prochaines heures\n"
+
+    return forecast_message
+
+# === Route Flask pour gérer les requêtes ===
+@app.route("/", methods=["POST"])
+def webhook():
+    global current_city
+    data = request.json
+
+    # Gérer les boutons cliqués
+    if "callback_query" in data:
+        callback_data = data["callback_query"]["data"]
+        chat_id = data["callback_query"]["message"]["chat"]["id"]
+
+        if callback_data == "change_city":
+            send_telegram_message(chat_id, "Veuillez envoyer le nom de la nouvelle ville.")
+        elif callback_data == "get_forecast":
+            forecast = get_forecast(current_city)
+            send_telegram_message(chat_id, forecast)
+
+    # Gérer les messages texte normaux
+    elif "message" in data:
+        message_text = data["message"]["text"]
+        chat_id = data["message"]["chat"]["id"]
+
+        if message_text.lower() == "menu":
+            send_telegram_buttons(chat_id)
+        elif message_text.startswith("/ville "):
+            new_city = message_text.split("/ville ")[1]
+            current_city = new_city
+            send_telegram_message(chat_id, f"🔄 Ville mise à jour : {new_city}")
+
+    return "OK", 200
+
+# === Lancer l'application Flask ===
 if __name__ == "__main__":
     app.run()
