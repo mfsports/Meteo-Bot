@@ -162,4 +162,15 @@ def webhook():
             user_state[chat_id] = "awaiting_city"
             send_telegram_message(chat_id, "🧭 Dis-moi la ville que tu veux consulter.")
         elif message_text == "📍 Localisation":
-           
+            send_telegram_message(chat_id, "📡 Partage ta position via le bouton ⬆️")
+        else:
+            send_telegram_message(
+                chat_id,
+                "🤖 Tape /start ou utilise les boutons ci-dessous 👇",
+                reply_markup=get_main_keyboard()
+            )
+
+    return "OK", 200
+
+if __name__ == "__main__":
+    app.run()
