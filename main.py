@@ -65,13 +65,12 @@ def get_forecast(city):
 # === Route Flask pour gérer les requêtes ===
 @app.route("/", methods=["POST"])
 def webhook():
-    print("Webhook déclenché")
+    global current_city
     data = request.json
-    print("Données reçues :", data)
 
     # Gérer les boutons cliqués
     if "callback_query" in data:
-        print("Callback détecté :", data["callback_query"]["data"])
+        print("Callback reçu :", data["callback_query"]["data"])
         callback_data = data["callback_query"]["data"]
         chat_id = data["callback_query"]["message"]["chat"]["id"]
 
@@ -81,7 +80,18 @@ def webhook():
             forecast = get_forecast(current_city)
             send_telegram_message(chat_id, forecast)
 
-    # ... le reste de ta logique
+    # Gérer les messages texte normaux
+    elif "message" in data:
+        message_text = data["message"]["text"]
+        chat_id = data["message"]["chat"]["id"]
+
+        if message_text.lower() == "menu":
+            send_telegram_buttons(chat_id)
+        elif message_text.startswith("/ville "):
+            new_city = message_text.split("/ville ")[1]
+            current_city = new_city
+            send_telegram_message(chat_id, f"🔄 Ville mise à jour : {new_city}")
+
     return "OK", 200
 
 # === Lancer l'application Flask ===
