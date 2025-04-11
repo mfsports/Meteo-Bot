@@ -16,36 +16,29 @@ def send_telegram_message(chat_id, message):
     payload = {"chat_id": chat_id, "text": message}
     requests.post(url, data=payload)
 
+# === Fonction pour convertir les degrés en direction cardinal ===
+def degrees_to_cardinal(deg):
+    dirs = ['nord', 'nord-est', 'est', 'sud-est', 'sud', 'sud-ouest', 'ouest', 'nord-ouest']
+    ix = int((deg + 22.5) / 45.0) % 8
+    return dirs[ix]
+
 # === Fonction pour récupérer les prévisions météo ===
 def get_forecast(city):
     url = f"http://api.openweathermap.org/data/2.5/forecast?q={city}&appid={OPENWEATHER_API_KEY}&units=metric&lang=fr"
     response = requests.get(url)
     data = response.json()
 
-    forecast_message = f"🌤️ Météo à {city} :\n"
-    next_rain = None  # Heure de la prochaine averse
+    forecast_message = f"🌤️ Météo à {city} pour les 6 prochaines heures :\n"
 
-    # Récupère les prévisions des prochaines heures
-    for item in data["list"][:2]:  # Les 2 prochaines prévisions (~6 heures)
+    # Récupère et affiche chaque prévision heure par heure pour 6 heures
+    for item in data["list"][:6]:  # Les 6 prochaines prévisions (heure par heure)
         time = item["dt_txt"]
         temp = item["main"]["temp"]
         wind_speed = item["wind"]["speed"]
-        wind_dir = item["wind"]["deg"]
-        rain_volume = item.get("rain", {}).get("3h", 0)
+        wind_dir_deg = item["wind"]["deg"]
+        wind_dir = degrees_to_cardinal(wind_dir_deg)
 
-        # Identifier la prochaine averse
-        if rain_volume > 0 and next_rain is None:
-            next_rain = time
-
-        forecast_message += (
-            f"- {time} : {temp}°C, vent à {wind_speed} km/h (direction : {wind_dir}°)"
-            + (f", pluie prévue : {rain_volume} mm\n" if rain_volume > 0 else ", pas de pluie\n")
-        )
-
-    if next_rain:
-        forecast_message += f"\n🌧️ Prochaine averse prévue vers {next_rain}\n"
-    else:
-        forecast_message += "\n✅ Aucune averse prévue dans les 6 prochaines heures\n"
+        forecast_message += f"- {time}: {temp}°C, vent {wind_speed} km/h venant du {wind_dir}\n"
 
     return forecast_message
 
@@ -80,7 +73,7 @@ def webhook():
 
         # Commande inconnue
         else:
-            send_telegram_message(chat_id, "Commande inconnue. Essayez : /ville, /meteo, /pluie")
+            send_telegram_message(chat_id, "Comment puis-je t'aider ?\n/pluie\n/meteo\n/ville")
 
     return "OK", 200
 
