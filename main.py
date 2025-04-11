@@ -8,8 +8,8 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
-# Dictionnaire pour stocker la ville de chaque utilisateur
-user_cities = {}
+# Variable globale pour la ville courante
+current_city = "Paris"  # Ville par défaut
 
 # === Fonction pour envoyer un message Telegram ===
 def send_telegram_message(chat_id, message):
@@ -29,11 +29,12 @@ def get_forecast(city):
     response = requests.get(url)
     data = response.json()
 
-    forecast_message = f"🌤️ Météo à {city} pour les 6 prochaines heures :\n"
+    if "list" not in data:
+        return f"Erreur : Impossible de trouver les prévisions pour {city}. Réponse API : {data}"
 
-    # Prends les 2 premières prévisions (6 heures)
-    for item in data["list"][:2]:  
-        time = item["dt_txt"][11:16]  # Garde juste HH:MM
+    forecast_message = f"🌤️ Météo à {city} pour les 6 prochaines heures :\n"
+    for item in data["list"][:2]:  # Les 2 prochaines prévisions (6 heures)
+        time = item["dt_txt"][11:16]
         temp = round(item["main"]["temp"])
         wind_speed = round(item["wind"]["speed"])
         wind_dir_deg = item["wind"]["deg"]
@@ -46,6 +47,7 @@ def get_forecast(city):
 # === Route Flask pour gérer les requêtes ===
 @app.route("/", methods=["POST"])
 def webhook():
+    global current_city
     data = request.json
 
     if "message" in data:
@@ -55,19 +57,17 @@ def webhook():
         # Commande pour changer de ville
         if message_text.startswith("/ville "):
             new_city = message_text.split("/ville ")[1]
-            user_cities[chat_id] = new_city
+            current_city = new_city
             send_telegram_message(chat_id, f"🔄 Ville mise à jour : {new_city}")
         
         # Commande pour obtenir la météo
         elif message_text == "/meteo":
-            user_city = user_cities.get(chat_id, "Paris")  # Par défaut, "Paris" si non définie
-            forecast = get_forecast(user_city)
+            forecast = get_forecast(current_city)
             send_telegram_message(chat_id, forecast)
 
         # Commande pour savoir quand il pleuvra
         elif message_text == "/pluie":
-            user_city = user_cities.get(chat_id, "Paris")  # Par défaut, "Paris" si non définie
-            forecast = get_forecast(user_city)
+            forecast = get_forecast(current_city)
             if "🌧️" in forecast:
                 send_telegram_message(chat_id, forecast)
             else:
@@ -75,7 +75,7 @@ def webhook():
 
         # Commande inconnue
         else:
-            send_telegram_message(chat_id, "Comment puis-je t'aider ?\n/pluie\n/meteo\n/ville")
+            send_telegram_message(chat_id, "🤖 Comment puis-je t'aider ?\n/pluie pour savoir si il va pleuvoir\n/meteo pour connaitre les 6 prochaines heures\n/ville pour changer de localisation")
 
     return "OK", 200
 
