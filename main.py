@@ -1,26 +1,23 @@
 import os
-import logging
-from urllib.parse import quote
 import requests
 from flask import Flask, request, jsonify
+from urllib.parse import quote
 
-# Configuration initiale
 app = Flask(__name__)
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
-# Variables d'environnement
+# Configuration
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 
-# Mémoire utilisateur (à remplacer par une DB en production)
-user_state = {}
+# --- Fonctions Utiles ---
+def degrees_to_cardinal(deg):
+    """Convertit les degrés en direction (ex: 90 → 'est')"""
+    directions = ['nord', 'nord-est', 'est', 'sud-est', 
+                 'sud', 'sud-ouest', 'ouest', 'nord-ouest']
+    return directions[round((deg % 360) / 45) % 8]
 
-# -------------------------------------------------------------------
-# Helpers
-# -------------------------------------------------------------------
-def send_telegram_message(chat_id: int, text: str, reply_markup: dict = None) -> bool:
-    """Envoie un message via l'API Telegram."""
+def send_telegram_message(chat_id, text, reply_markup=None):
+    """Envoie un message via l'API Telegram"""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
@@ -28,156 +25,110 @@ def send_telegram_message(chat_id: int, text: str, reply_markup: dict = None) ->
         "parse_mode": "Markdown",
         "reply_markup": reply_markup
     }
-    
-    try:
-        response = requests.post(url, json=payload)
-        response.raise_for_status()
-        return True
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Erreur d'envoi Telegram: {e}")
-        return False
+    requests.post(url, json=payload)
 
-def degrees_to_cardinal(deg: float) -> str:
-    """Convertit des degrés en direction cardinale (ex: 90 → 'est')."""
-    directions = ['nord', 'nord-est', 'est', 'sud-est', 
-                 'sud', 'sud-ouest', 'ouest', 'nord-ouest']
-    return directions[round((deg % 360) / 45) % 8]
-
-def get_wind_advice(wind_deg: float) -> str:
-    """Retourne un conseil cycliste basé sur la direction du vent."""
-    return degrees_to_cardinal((wind_deg + 180) % 360)
-
-def get_main_keyboard() -> dict:
-    """Génère le clavier Telegram avec bouton de localisation."""
+# --- Claviers ---
+def get_main_menu():
+    """Menu principal avec 2 options"""
     return {
         "keyboard": [
-            [{"text": "📍 Localisation", "request_location": True}],
-            [{"text": "🔄 Actualiser"}]
+            [{"text": "📍 Donner ma position", "request_location": True}],
+            [{"text": "🏙 Entrer une ville"}]
         ],
-        "resize_keyboard": True,
-        "one_time_keyboard": False
+        "resize_keyboard": True
     }
 
-# -------------------------------------------------------------------
-# Météo
-# -------------------------------------------------------------------
-def fetch_weather_data(url: str) -> dict:
-    """Récupère les données météo avec gestion des erreurs."""
+def get_cancel_button():
+    """Bouton d'annulation"""
+    return {
+        "keyboard": [[{"text": "❌ Annuler"}]],
+        "resize_keyboard": True
+    }
+
+# --- Météo ---
+def get_weather(lat=None, lon=None, city=None):
+    """Récupère la météo via OpenWeather"""
     try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Erreur API Météo: {e}")
-        return None
-
-def format_forecast(data: dict, location_name: str = None) -> str:
-    """Formate les données météo en message lisible."""
-    if not data or "list" not in data:
-        return "❌ Données météo indisponibles."
-
-    current = data["list"][0]
-    forecast_msg = [
-        f"🌦 **Météo {'à ' + location_name if location_name else 'actuelle'}**",
-        f"➡️ {current['weather'][0]['description'].capitalize()}, {round(current['main']['temp'])}°C",
-        "\n⏳ **Prévisions 6h** :"
-    ]
-
-    rain_detected = False
-    wind_dir = None
-
-    for entry in data["list"][:2]:
-        time = entry["dt_txt"][11:16]
-        temp = round(entry["main"]["temp"])
-        wind_speed = round(entry["wind"]["speed"])
-        wind_dir = entry["wind"]["deg"]
-        rain = entry.get("rain", {}).get("3h", 0)
+        if city:
+            url = f"http://api.openweathermap.org/data/2.5/weather?q={quote(city)}&appid={OPENWEATHER_API_KEY}&units=metric&lang=fr"
+        else:
+            url = f"http://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={OPENWEATHER_API_KEY}&units=metric&lang=fr"
         
-        forecast_msg.append(
-            f"- {time} : {temp}°C, vent {wind_speed} km/h ({degrees_to_cardinal(wind_dir)})"
-            f"{f', pluie : {rain} mm' if rain > 0 else ''}"
+        response = requests.get(url)
+        data = response.json()
+        
+        if data.get("cod") != 200:
+            return "❌ Erreur : " + data.get("message", "Ville introuvable ou API indisponible")
+        
+        temp = round(data["main"]["temp"])
+        desc = data["weather"][0]["description"].capitalize()
+        wind_speed = round(data["wind"]["speed"] * 3.6)  # Conversion en km/h
+        wind_dir = degrees_to_cardinal(data["wind"]["deg"])
+        
+        message = (
+            f"🌦 *Météo {'à ' + city if city else 'actuelle'}*\n"
+            f"• {temp}°C, {desc}\n"
+            f"• Vent : {wind_speed} km/h ({wind_dir})\n\n"
+            f"🚴 *Conseil* : Partez vers le **{wind_dir}** pour avoir le vent dans le dos !"
         )
-        if rain > 0:
-            rain_detected = True
+        
+        return message
+    
+    except Exception as e:
+        return "❌ Erreur lors de la récupération de la météo."
 
-    if wind_dir:
-        forecast_msg.append(
-            f"\n🚴 **Conseil** : Partez vers le {get_wind_advice(wind_dir)} "
-            "pour avoir le vent dans le dos !"
-        )
-
-    if not rain_detected:
-        forecast_msg.append("\n✅ Pas de pluie prévue dans les 6h")
-
-    return "\n".join(forecast_msg)
-
-def get_forecast_by_coords(lat: float, lon: float) -> str:
-    """Récupère la météo par coordonnées GPS."""
-    url = (
-        f"http://api.openweathermap.org/data/2.5/forecast?"
-        f"lat={lat}&lon={lon}&appid={OPENWEATHER_API_KEY}"
-        f"&units=metric&lang=fr"
-    )
-    data = fetch_weather_data(url)
-    return format_forecast(data)
-
-def get_forecast_by_city(city: str) -> str:
-    """Récupère la météo par nom de ville."""
-    url = (
-        f"http://api.openweathermap.org/data/2.5/forecast?"
-        f"q={quote(city)}&appid={OPENWEATHER_API_KEY}"
-        f"&units=metric&lang=fr"
-    )
-    data = fetch_weather_data(url)
-    return format_forecast(data, city)
-
-# -------------------------------------------------------------------
-# Webhook
-# -------------------------------------------------------------------
+# --- Webhook ---
 @app.route("/", methods=["POST"])
 def webhook():
-    """Endpoint principal pour les webhooks Telegram."""
-    if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != os.getenv("WEBHOOK_SECRET"):
-        return jsonify({"status": "unauthorized"}), 403
-
-    try:
-        data = request.get_json()
-        chat_id = data["message"]["chat"]["id"]
-        message = data["message"]
-
-        # Gestion localisation
-        if "location" in message:
-            forecast = get_forecast_by_coords(
-                message["location"]["latitude"],
-                message["location"]["longitude"]
-            )
-            send_telegram_message(chat_id, forecast, get_main_keyboard())
-
-        # Gestion texte
-        elif "text" in message:
-            text = message["text"].strip()
-            
-            if text == "/start":
-                user_state[chat_id] = "ready"
-                send_telegram_message(
-                    chat_id,
-                    "🚴 **Bienvenue !** Envoyez votre position ou un nom de ville.",
-                    get_main_keyboard()
-                )
-            elif text == "🔄 Actualiser":
-                send_telegram_message(
-                    chat_id,
-                    "🔄 Actualisation... Envoyez à nouveau votre position.",
-                    get_main_keyboard()
-                )
-            else:
-                forecast = get_forecast_by_city(text)
-                send_telegram_message(chat_id, forecast, get_main_keyboard())
-
-    except Exception as e:
-        logger.error(f"Erreur webhook: {e}")
-        return jsonify({"status": "error"}), 500
-
+    data = request.json
+    chat_id = data["message"]["chat"]["id"]
+    text = data["message"].get("text", "").strip()
+    
+    # Réponse à n'importe quel message
+    if text == "/start" or not text.startswith("/"):
+        send_telegram_message(
+            chat_id,
+            "🌬️ *Bonjour cycliste !* Comment voulez-vous obtenir la météo ?",
+            reply_markup=get_main_menu()
+        )
+    
+    # Demande de saisie manuelle
+    elif text == "🏙 Entrer une ville":
+        send_telegram_message(
+            chat_id,
+            "📝 Entrez le nom d'une ville (ex: Paris, Lyon) :",
+            reply_markup=get_cancel_button()
+        )
+    
+    # Annulation
+    elif text == "❌ Annuler":
+        send_telegram_message(
+            chat_id,
+            "✅ Annulé. Que souhaitez-vous faire ?",
+            reply_markup=get_main_menu()
+        )
+    
+    # Traitement d'une ville
+    elif text and text != "🏙 Entrer une ville":
+        weather = get_weather(city=text)
+        send_telegram_message(
+            chat_id,
+            weather,
+            reply_markup=get_main_menu()
+        )
+    
+    # Traitement de la localisation
+    if "location" in data["message"]:
+        weather = get_weather(
+            lat=data["message"]["location"]["latitude"],
+            lon=data["message"]["location"]["longitude"]
+        )
+        send_telegram_message(
+            chat_id,
+            weather,
+            reply_markup=get_main_menu()
+        )
+    
     return jsonify({"status": "ok"}), 200
 
 if __name__ == "__main__":
